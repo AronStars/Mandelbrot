@@ -25,15 +25,17 @@ bool needsRedraw = true;
 
 // Calculates iterations and final complex value for a point in the complex plane
 // Returns iteration count. Stores final complex value components in zx_out, zy_out.
-int CalculateMandelbrot(const double cx, const double cy, const int maxIter, double& zx_out, double& zy_out) {
+int CalculateMandelbrot(const double cx, const double cy, const int maxIter, double &zx_out, double &zy_out) {
     // Check if the point is in the main cardioid
     if (const double q = (cx - 0.25) * (cx - 0.25) + cy * cy; q * (q + (cx - 0.25)) < 0.25 * cy * cy) {
-        zx_out = 0; zy_out = 0;
+        zx_out = 0;
+        zy_out = 0;
         return maxIter;
     }
     // Check if the point is in the period-2 bulb
     if ((cx + 1.0) * (cx + 1.0) + cy * cy < 0.0625) {
-        zx_out = 0; zy_out = 0;
+        zx_out = 0;
+        zy_out = 0;
         return maxIter;
     }
 
@@ -43,7 +45,7 @@ int CalculateMandelbrot(const double cx, const double cy, const int maxIter, dou
     double zy2 = 0.0;
     int iter = 0;
 
-    while (zx2 + zy2 < 4.0 && iter < maxIter){
+    while (zx2 + zy2 < 4.0 && iter < maxIter) {
         zy = 2.0 * zx * zy + cy;
         zx = zx2 - zy2 + cx;
         zx2 = zx * zx;
@@ -70,14 +72,16 @@ Color GetMandelbrotColor(int iterations, int currentMaxIterations, double zReal,
     return ColorFromHSV(hue, saturation, value);
 }
 
-Vector2 MapPixelToComplex(const Vector2 pixelPos, const Vector2 currentViewCenter, const double currentComplexWidth, const int currentScreenWidth, const int currentScreenHeight) {
+Vector2 MapPixelToComplex(const Vector2 pixelPos, const Vector2 currentViewCenter, const double currentComplexWidth,
+                          const int currentScreenWidth, const int currentScreenHeight) {
     const double scale = currentComplexWidth / currentScreenWidth;
     const double cx = currentViewCenter.x + (pixelPos.x - currentScreenWidth / 2.0) * scale;
     const double cy = currentViewCenter.y - (pixelPos.y - currentScreenHeight / 2.0) * scale;
-    return { static_cast<float>(cx), static_cast<float>(cy) };
+    return {static_cast<float>(cx), static_cast<float>(cy)};
 }
 
-void UpdateMandelbrotTexture(const RenderTexture2D& targetTexture, const Vector2 centerToRender, const double complexWidthToRender, const int iterLimit) {
+void UpdateMandelbrotTexture(const RenderTexture2D &targetTexture, const Vector2 centerToRender,
+                             const double complexWidthToRender, const int iterLimit) {
     const int texWidth = targetTexture.texture.width;
     const int texHeight = targetTexture.texture.height;
     const double scale = complexWidthToRender / texWidth;
@@ -96,7 +100,8 @@ void UpdateMandelbrotTexture(const RenderTexture2D& targetTexture, const Vector2
                 const double cy = centerToRender.y - (y - texHeight / 2.0) * scale;
                 double finalZReal, finalZImag;
                 const int iterations = CalculateMandelbrot(cx, cy, iterLimit, finalZReal, finalZImag);
-                pixelColors[static_cast<size_t>(y) * texWidth + x] = GetMandelbrotColor(iterations, iterLimit, finalZReal, finalZImag);
+                pixelColors[static_cast<size_t>(y) * texWidth + x] = GetMandelbrotColor(
+                    iterations, iterLimit, finalZReal, finalZImag);
             }
         }
     };
@@ -110,7 +115,7 @@ void UpdateMandelbrotTexture(const RenderTexture2D& targetTexture, const Vector2
             currentY += rowsForThread;
         }
     }
-    for (auto& t : threads) {
+    for (auto &t: threads) {
         if (t.joinable()) t.join();
     }
     UpdateTexture(targetTexture.texture, pixelColors.data());
@@ -127,13 +132,15 @@ int main() {
         const float wheelMove = GetMouseWheelMove();
         const Vector2 currentMousePos = GetMousePosition();
         if (wheelMove != 0) {
-            const auto [x, y] = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex, screenWidth, screenHeight);
+            const auto [x, y] = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex, screenWidth,
+                                                  screenHeight);
 
             viewWidthComplex *= std::pow(zoomFactor, -wheelMove);
             maxIterations = static_cast<int>(100.0 + 150.0 * std::log(initialViewWidthComplex / viewWidthComplex));
             if (maxIterations < 100) maxIterations = 100;
 
-            const Vector2 mouseComplexPosAfterZoom = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex, screenWidth, screenHeight);
+            const Vector2 mouseComplexPosAfterZoom = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex,
+                                                                       screenWidth, screenHeight);
             viewCenter.x += (x - mouseComplexPosAfterZoom.x);
             viewCenter.y -= (y - mouseComplexPosAfterZoom.y);
 
@@ -188,7 +195,6 @@ int main() {
     }
 
     UnloadRenderTexture(mandelbrotTexture);
-    int a = 0;
     CloseWindow();
     return 0;
 }
