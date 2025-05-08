@@ -33,15 +33,23 @@ std::atomic<unsigned int> g_currentRenderGeneration(0);
 
 int CalculateMandelbrot(const double cx, const double cy, const int maxIter, double &zx_out, double &zy_out) {
     if (const double q = (cx - 0.25) * (cx - 0.25) + cy * cy; q * (q + (cx - 0.25)) < 0.25 * cy * cy) {
-        zx_out = 0; zy_out = 0; return maxIter;
+        zx_out = 0;
+        zy_out = 0;
+        return maxIter;
     }
     if ((cx + 1.0) * (cx + 1.0) + cy * cy < 0.0625) {
-        zx_out = 0; zy_out = 0; return maxIter;
+        zx_out = 0;
+        zy_out = 0;
+        return maxIter;
     }
     double zx = 0.0, zy = 0.0, zx2 = 0.0, zy2 = 0.0;
     int iter = 0;
     while (zx2 + zy2 < 4.0 && iter < maxIter) {
-        zy = 2.0 * zx * zy + cy; zx = zx2 - zy2 + cx; zx2 = zx * zx; zy2 = zy * zy; iter++;
+        zy = 2.0 * zx * zy + cy;
+        zx = zx2 - zy2 + cx;
+        zx2 = zx * zx;
+        zy2 = zy * zy;
+        iter++;
     }
     zx_out = zx; zy_out = zy; return iter;
 }
@@ -130,7 +138,7 @@ int main() {
             const Vector2 mouseComplexPosAfterZoom = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex, screenWidth, screenHeight);
             viewCenter.x += (xVal - mouseComplexPosAfterZoom.x);
             viewCenter.y -= (yVal - mouseComplexPosAfterZoom.y);
-            
+
             isLowResPanningActive = false; // Zooming always requests full-res
             interactionOccurred = true;
         }
@@ -162,15 +170,15 @@ int main() {
                 interactionOccurred = true; // Trigger full-res redraw
             }
         }
-        
-        if(interactionOccurred){
+
+        if (interactionOccurred) {
             g_currentRenderGeneration.fetch_add(1, std::memory_order_release);
             needsRedraw = true;
         }
 
         if (needsRedraw) {
             unsigned int generationBeforeUpdate = g_currentRenderGeneration.load(std::memory_order_acquire);
-            
+
             RenderTexture2D currentTargetTexture = isLowResPanningActive ? lowResMandelbrotTexture : mandelbrotTexture;
             UpdateMandelbrotTexture(currentTargetTexture, viewCenter, viewWidthComplex, maxIterations);
             
@@ -183,11 +191,19 @@ int main() {
         ClearBackground(RAYWHITE);
 
         if (isLowResPanningActive) {
-            const Rectangle lowResSourceRec = {0.0f, 0.0f, static_cast<float>(lowResMandelbrotTexture.texture.width), -static_cast<float>(lowResMandelbrotTexture.texture.height)};
-            constexpr Rectangle screenDestRec = {0.0f, 0.0f, static_cast<float>(screenWidth), static_cast<float>(screenHeight)};
-            DrawTexturePro(lowResMandelbrotTexture.texture, lowResSourceRec, screenDestRec, {0,0}, 0.0f, WHITE);
+            const Rectangle lowResSourceRec = {
+                0.0f, 0.0f, static_cast<float>(lowResMandelbrotTexture.texture.width),
+                -static_cast<float>(lowResMandelbrotTexture.texture.height)
+            };
+            constexpr Rectangle screenDestRec = {
+                0.0f, 0.0f, static_cast<float>(screenWidth), static_cast<float>(screenHeight)
+            };
+            DrawTexturePro(lowResMandelbrotTexture.texture, lowResSourceRec, screenDestRec, {0, 0}, 0.0f, WHITE);
         } else {
-            const Rectangle sourceRec = {0.0f, 0.0f, static_cast<float>(mandelbrotTexture.texture.width), -static_cast<float>(mandelbrotTexture.texture.height)};
+            const Rectangle sourceRec = {
+                0.0f, 0.0f, static_cast<float>(mandelbrotTexture.texture.width),
+                -static_cast<float>(mandelbrotTexture.texture.height)
+            };
             constexpr Vector2 textureDrawPosition = {0.0f, 0.0f};
             DrawTextureRec(mandelbrotTexture.texture, sourceRec, textureDrawPosition, WHITE);
         }
