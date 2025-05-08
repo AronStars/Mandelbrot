@@ -3,6 +3,7 @@
 #include <cmath>     // For std::pow, std::log, std::fmod
 #include <thread>
 #include <vector>
+#include <atomic>    // Required for std::atomic
 
 constexpr int screenWidth = 1280;
 constexpr int screenHeight = 720;
@@ -11,7 +12,7 @@ constexpr int screenHeight = 720;
 int maxIterations = 100;
 Vector2 viewCenter = {-0.7, 0.0};
 double viewWidthComplex = 3.5;
-constexpr double initialViewWidthComplex = 3.5; // Store the initial width for dynamic iteration calculation
+constexpr double initialViewWidthComplex = 3.5;
 
 // Interaction state
 double zoomFactor = 1.1;
@@ -22,6 +23,8 @@ Vector2 panStartCenter = {0, 0};
 RenderTexture2D mandelbrotTexture;
 bool needsRedraw = true;
 
+// Atomic counter for render generations to handle interruptions
+std::atomic<unsigned int> g_currentRenderGeneration(0);
 
 // Calculates iterations and final complex value for a point in the complex plane
 // Returns iteration count. Stores final complex value components in zx_out, zy_out.
@@ -82,19 +85,26 @@ Vector2 MapPixelToComplex(const Vector2 pixelPos, const Vector2 currentViewCente
 
 void UpdateMandelbrotTexture(const RenderTexture2D &targetTexture, const Vector2 centerToRender,
                              const double complexWidthToRender, const int iterLimit) {
+    // Capture the generation number for this specific render call
+    const unsigned int capturedRenderGeneration = g_currentRenderGeneration.load(std::memory_order_acquire);
+
     const int texWidth = targetTexture.texture.width;
     const int texHeight = targetTexture.texture.height;
-    const double scale = complexWidthToRender / texWidth;
-
-    std::vector<Color> pixelColors(static_cast<size_t>(texWidth) * texHeight);
+    std::vector<Color> pixelColors(static_cast<size_t>(texWidth) * texHeight); // Consider reusing this buffer
     unsigned int nThreadsUnsigned = std::thread::hardware_concurrency();
-    if (nThreadsUnsigned == 0) nThreadsUnsigned = 1;
+    if (nThreadsUnsigned == 0) nThreadsUnsigned = 1; // Fallback to 1 thread
     const int nThreads = static_cast<int>(nThreadsUnsigned);
     std::vector<std::thread> threads;
     threads.reserve(nThreadsUnsigned);
 
+    const double scale = complexWidthToRender / texWidth; // Define scale for lambda capture
+
     auto computeRows = [&](const int startY, const int endY) {
         for (int y = startY; y < endY; ++y) {
+            // Check if this render task is still current before processing a row
+            if (g_currentRenderGeneration.load(std::memory_order_acquire) != capturedRenderGeneration) {
+                return; // Abandon this outdated render task
+            }
             for (int x = 0; x < texWidth; ++x) {
                 const double cx = centerToRender.x + (x - texWidth / 2.0) * scale;
                 const double cy = centerToRender.y - (y - texHeight / 2.0) * scale;
@@ -115,15 +125,20 @@ void UpdateMandelbrotTexture(const RenderTexture2D &targetTexture, const Vector2
             currentY += rowsForThread;
         }
     }
-    for (auto &t: threads) {
+    for (auto &t : threads) {
         if (t.joinable()) t.join();
     }
-    UpdateTexture(targetTexture.texture, pixelColors.data());
+
+    // After threads are joined, check if this render is still the most current one
+    if (g_currentRenderGeneration.load(std::memory_order_acquire) == capturedRenderGeneration) {
+        UpdateTexture(targetTexture.texture, pixelColors.data());
+    }
+    // If not the current generation, do nothing; the main loop will handle `needsRedraw`.
 }
 
 int main() {
     InitWindow(screenWidth, screenHeight, "Mandelbrot Viewer");
-    SetTargetFPS(30);
+    SetTargetFPS(60); // Adjust FPS as needed, higher FPS might make interruptions more noticeable
 
     mandelbrotTexture = LoadRenderTexture(screenWidth, screenHeight);
     needsRedraw = true; // Render on the first frame
@@ -131,20 +146,20 @@ int main() {
     while (!WindowShouldClose()) {
         const float wheelMove = GetMouseWheelMove();
         const Vector2 currentMousePos = GetMousePosition();
+        bool interactionOccurred = false;
+
         if (wheelMove != 0) {
-            const auto [x, y] = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex, screenWidth,
-                                                  screenHeight);
+            const auto [xVal, yVal] = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex, screenWidth, screenHeight);
 
             viewWidthComplex *= std::pow(zoomFactor, -wheelMove);
             maxIterations = static_cast<int>(100.0 + 150.0 * std::log(initialViewWidthComplex / viewWidthComplex));
             if (maxIterations < 100) maxIterations = 100;
 
-            const Vector2 mouseComplexPosAfterZoom = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex,
-                                                                       screenWidth, screenHeight);
-            viewCenter.x += (x - mouseComplexPosAfterZoom.x);
-            viewCenter.y -= (y - mouseComplexPosAfterZoom.y);
+            const Vector2 mouseComplexPosAfterZoom = MapPixelToComplex(currentMousePos, viewCenter, viewWidthComplex, screenWidth, screenHeight);
+            viewCenter.x += (xVal - mouseComplexPosAfterZoom.x);
+            viewCenter.y -= (yVal - mouseComplexPosAfterZoom.y); // Corrected y-coordinate adjustment for complex plane
 
-            needsRedraw = true;
+            interactionOccurred = true;
         }
 
         const double currentScale = viewWidthComplex / screenWidth;
@@ -152,24 +167,42 @@ int main() {
             isPanning = true;
             panStartMouse = currentMousePos;
             panStartCenter = viewCenter;
+            // No need to set interactionOccurred here, as continuous panning will handle it
         }
 
         if (isPanning) {
             if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-                auto [x, y] = Vector2Subtract(currentMousePos, panStartMouse);
-                viewCenter.x = static_cast<float>(panStartCenter.x - x * currentScale);
-                viewCenter.y = static_cast<float>(panStartCenter.y - y * currentScale);
-                needsRedraw = true;
+                Vector2 mouseDelta = Vector2Subtract(currentMousePos, panStartMouse);
+                // Check if there's actual movement to avoid redundant redraws
+                if (mouseDelta.x != 0 || mouseDelta.y != 0) {
+                    viewCenter.x = static_cast<float>(panStartCenter.x - mouseDelta.x * currentScale);
+                    viewCenter.y = static_cast<float>(panStartCenter.y - mouseDelta.y * currentScale); // Corrected y-coordinate adjustment
+                    interactionOccurred = true;
+                }
             }
             if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                 isPanning = false;
+                // interactionOccurred might have been set if there was movement.
+                // If only a click, no redraw was triggered yet.
             }
         }
+        
+        if(interactionOccurred){
+            g_currentRenderGeneration.fetch_add(1, std::memory_order_release); // Increment generation
+            needsRedraw = true;
+        }
+
 
         // --- Mandelbrot Texture Update ---
         if (needsRedraw) {
+            unsigned int generationBeforeUpdate = g_currentRenderGeneration.load(std::memory_order_acquire);
             UpdateMandelbrotTexture(mandelbrotTexture, viewCenter, viewWidthComplex, maxIterations);
-            needsRedraw = false;
+            
+            // If the generation hasn't changed during the update process, the render is valid.
+            if (g_currentRenderGeneration.load(std::memory_order_acquire) == generationBeforeUpdate) {
+                 needsRedraw = false;
+            }
+            // Otherwise, needsRedraw remains true, and the loop will attempt to render the newer generation.
         }
 
         // --- Drawing ---
@@ -178,7 +211,7 @@ int main() {
 
         const auto texViewWidth = static_cast<float>(mandelbrotTexture.texture.width);
         const auto texViewHeight = static_cast<float>(mandelbrotTexture.texture.height);
-        const Rectangle sourceRec = {0.0f, 0.0f, texViewWidth, -texViewHeight}; // Negative height to flip Y
+        const Rectangle sourceRec = {0.0f, 0.0f, texViewWidth, -texViewHeight}; 
         constexpr Vector2 textureDrawPosition = {0.0f, 0.0f};
         DrawTextureRec(mandelbrotTexture.texture, sourceRec, textureDrawPosition, WHITE);
 
